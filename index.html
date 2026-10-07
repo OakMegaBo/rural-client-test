@@ -171,6 +171,20 @@
         width: 100%;
         min-height: 2.75rem;
       }
+      .diagnostics { margin-top: 1rem; }
+      .diagnostics h2 { font-size: 1rem; margin-bottom: 0.5rem; }
+      .diagnostics dl { margin: 0; font-size: 0.78rem; }
+      .diagnostics dt { font-weight: 600; margin-top: 0.5rem; }
+      .diagnostics dd { margin: 0; overflow-wrap: anywhere; }
+      .diagnostics__actions { display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.8rem; }
+      .diagnostics pre, .diagnostics textarea {
+        width: 100%; font: 0.78rem/1.6 monospace; white-space: pre-wrap;
+        overflow-wrap: anywhere; background: var(--muted); color: var(--foreground);
+        border: 1px solid var(--border); border-radius: 0.5rem; padding: 0.75rem;
+      }
+      .diagnostics pre { max-height: 22rem; overflow: auto; margin-bottom: 0; }
+      .diagnostics textarea { min-height: 12rem; margin-top: 0.5rem; }
+      .diagnostics__error { white-space: pre-wrap; overflow-wrap: anywhere; }
       @media (max-width: 767px) {
         :root { font-size: 16px; }
         .main-content { padding: 1rem 0.75rem; }
@@ -252,6 +266,7 @@
                     :src="audioObjectUrl"
                     controls
                     preload="metadata"
+                    @error="recordPlaybackError"
                   >
                     您的瀏覽器不支援音檔播放。
                   </audio>
@@ -262,6 +277,24 @@
               </div>
 
         </div>
+        <section class="content-card diagnostics" aria-labelledby="diagnostics-title">
+          <h2 id="diagnostics-title">測試診斷</h2>
+          <p class="field-hint">紀錄只保留在目前頁面，不會傳送至伺服器。錯誤名稱不代表已確定原因。</p>
+          <dl>
+            <template v-for="item in diagnosticEnvironment" :key="item.label">
+              <dt>{{ item.label }}</dt>
+              <dd>{{ item.value }}</dd>
+            </template>
+          </dl>
+          <p v-if="latestDiagnosticError" class="field-error diagnostics__error" role="status">最近一次錯誤：{{ latestDiagnosticError }}</p>
+          <div class="diagnostics__actions">
+            <p-button type="button" label="複製診斷資訊" icon="pi pi-copy" severity="secondary" outlined @click="copyDiagnostics"></p-button>
+            <p-button type="button" label="清除紀錄" icon="pi pi-trash" severity="secondary" outlined @click="clearDiagnostics"></p-button>
+          </div>
+          <p v-if="diagnosticCopyStatus" class="field-hint" role="status">{{ diagnosticCopyStatus }}</p>
+          <textarea v-if="manualCopyText" :value="manualCopyText" readonly aria-label="可手動複製的診斷資訊"></textarea>
+          <pre aria-label="測試步驟與錯誤紀錄">{{ diagnosticLogText }}</pre>
+        </section>
       </main>
     </div>
     <script src="https://scrm.oakmega.site/0/js/vue3.prod.js"></script>
@@ -293,6 +326,75 @@
           let recordingTimerId = null;
           let mediaRequestId = 0;
           let isComponentActive = true;
+
+          const diagnosticEntries = ref([]);
+          const latestDiagnosticError = ref("");
+          const diagnosticCopyStatus = ref("");
+          const manualCopyText = ref("");
+          const diagnosticEnvironment = [
+            { label: "網頁協定", value: window.location.protocol },
+            { label: "安全環境", value: window.isSecureContext ? "是" : "否" },
+            { label: "getUserMedia", value: navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function" ? "支援" : "不支援" },
+            { label: "MediaRecorder", value: window.MediaRecorder ? "支援" : "不支援" },
+            { label: "錄音格式檢查", value: window.MediaRecorder && typeof MediaRecorder.isTypeSupported === "function" ? "支援" : "未提供，使用瀏覽器預設格式" },
+            { label: "瀏覽器資訊", value: navigator.userAgent || "未提供" },
+          ];
+          const diagnosticLogText = computed(() => diagnosticEntries.value.join("\n\n") || "尚無測試紀錄");
+          const diagnosticText = computed(() => [
+            "錄音測試診斷",
+            ...diagnosticEnvironment.map(item => `${item.label}：${item.value}`),
+            "", diagnosticLogText.value,
+          ].join("\n"));
+
+          function addDiagnostic(stage, detail = "", error = null) {
+            let message = `${new Date().toLocaleTimeString("zh-TW", { hour12: false })} ${stage}`;
+            if (detail) message += `：${detail}`;
+            if (error) {
+              const errorDetail = `錯誤名稱：${error.name || "UnknownError"}\n原始訊息：${error.message || "未提供"}`;
+              message += `\n${errorDetail}`;
+              latestDiagnosticError.value = `${stage}${detail ? `（${detail}）` : ""}\n${errorDetail}`;
+            }
+            diagnosticEntries.value = [...diagnosticEntries.value, message].slice(-100);
+            diagnosticCopyStatus.value = "";
+            manualCopyText.value = "";
+          }
+
+          function diagnosticWarning(stage, ...details) {
+            console.warn(stage, ...details);
+            const error = details.find(value => value && typeof value === "object");
+            const detail = details.filter(value => typeof value === "string").join(" ");
+            addDiagnostic(stage.replace(/^\[錄音\]\s*/, ""), detail, error || { name: "UnknownError", message: "未提供" });
+          }
+
+          async function copyDiagnostics() {
+            const text = diagnosticText.value;
+            try {
+              if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function")
+                throw new Error("瀏覽器未提供剪貼簿功能");
+              await navigator.clipboard.writeText(text);
+              diagnosticCopyStatus.value = "診斷資訊已複製。";
+              manualCopyText.value = "";
+            } catch (_) {
+              manualCopyText.value = text;
+              diagnosticCopyStatus.value = "無法自動複製，請長按下方文字框，選取全部後複製。";
+            }
+          }
+
+          function clearDiagnostics() {
+            diagnosticEntries.value = [];
+            latestDiagnosticError.value = "";
+            diagnosticCopyStatus.value = "";
+            manualCopyText.value = "";
+          }
+
+          function recordPlaybackError(event) {
+            const error = event.target && event.target.error;
+            if (!error) return;
+            addDiagnostic("播放音檔失敗", `MediaError 代碼 ${error.code}`, {
+              name: "MediaError",
+              message: error.message || "瀏覽器未提供播放失敗原因",
+            });
+          }
 
           const hasAudio = computed(
             () => audioBlob.value instanceof Blob && audioBlob.value.size > 0
@@ -342,6 +444,7 @@
             audioMimeType.value = mimeType;
             audioObjectUrl.value = URL.createObjectURL(blob);
             audioErrorMessage.value = "";
+            addDiagnostic("顯示音檔", `成功，格式 ${mimeType}，大小 ${blob.size} bytes`);
           }
 
           function recordingMimeTypes() {
@@ -352,12 +455,17 @@
               "audio/ogg;codecs=opus",
             ];
             // 缺少格式檢查時，不猜測支援格式，交由瀏覽器決定。
-            if (typeof MediaRecorder.isTypeSupported !== "function") return [""];
+            if (typeof MediaRecorder.isTypeSupported !== "function") {
+              addDiagnostic("格式檢查", "未提供 isTypeSupported，使用瀏覽器預設格式");
+              return [""];
+            }
             const supported = candidates.filter((type) => {
               try {
-                return MediaRecorder.isTypeSupported(type);
+                const supported = MediaRecorder.isTypeSupported(type);
+                addDiagnostic("格式檢查", `${type} — ${supported ? "支援" : "不支援"}`);
+                return supported;
               } catch (error) {
-                console.warn("[錄音] 檢查格式失敗", type, error);
+                diagnosticWarning("[錄音] 檢查格式失敗", type, error);
                 return false;
               }
             });
@@ -408,6 +516,7 @@
             audioErrorMessage.value = "";
             let stage = "取得麥克風";
             let requestedStream = null;
+            addDiagnostic("開始錄音", "準備取得麥克風");
 
             try {
               requestedStream = await navigator.mediaDevices.getUserMedia(
@@ -418,6 +527,7 @@
                 return;
               }
               mediaStream = requestedStream;
+              addDiagnostic("取得麥克風", "成功");
               let lastError = null;
               let startedRecorder = null;
               for (const mimeType of recordingMimeTypes()) {
@@ -426,9 +536,11 @@
                 const sessionChunks = [];
                 try {
                   stage = "建立錄音器";
+                  addDiagnostic(stage, `嘗試 ${mimeType || "瀏覽器預設格式"}`);
                   recorder = mimeType
                     ? new MediaRecorder(requestedStream, { mimeType })
                     : new MediaRecorder(requestedStream);
+                  addDiagnostic(stage, "成功");
                   recorder.addEventListener("dataavailable", (event) => {
                     if (
                       attemptActive && requestId === mediaRequestId &&
@@ -447,6 +559,7 @@
                       if (requestId !== mediaRequestId || !isComponentActive)
                         return;
                       stopRecordingTimer();
+                      addDiagnostic("停止錄音", "完成，已釋放麥克風");
                       const actualMimeType =
                         trimmed(recorder.mimeType) ||
                         trimmed(sessionChunks[0] && sessionChunks[0].type) ||
@@ -455,6 +568,7 @@
                       isRecording.value = false;
                       try {
                         const blob = new Blob(sessionChunks, { type: actualMimeType });
+                        addDiagnostic("產生音檔", `格式 ${actualMimeType}，大小 ${blob.size} bytes`);
                         if (blob.size > 0) {
                           setAudioSelection(
                             blob,
@@ -462,10 +576,11 @@
                             actualMimeType
                           );
                         } else {
+                          addDiagnostic("產生音檔失敗", "音檔為空", { name: "EmptyAudio", message: "未錄到有效音訊" });
                           audioErrorMessage.value = "未錄到有效音訊，請重新錄音。";
                         }
                       } catch (error) {
-                        console.warn("[錄音] 產生音檔失敗", error);
+                        diagnosticWarning("[錄音] 產生音檔失敗", error);
                         audioErrorMessage.value =
                           "錄音過程發生錯誤，請重新錄音或改用既有音檔。";
                       }
@@ -477,11 +592,11 @@
                     (event) => {
                       if (!attemptActive) return;
                       attemptActive = false;
-                      console.warn("[錄音] 錄音過程失敗", event.error || event);
+                      diagnosticWarning("[錄音] 錄音過程失敗", event.error || event);
                       try {
                         if (recorder.state !== "inactive") recorder.stop();
                       } catch (error) {
-                        console.warn("[錄音] 錯誤後停止錄音器失敗", error);
+                        diagnosticWarning("[錄音] 錯誤後停止錄音器失敗", error);
                       }
                       requestedStream.getTracks().forEach((track) => track.stop());
                       if (mediaStream === requestedStream) mediaStream = null;
@@ -496,18 +611,20 @@
                     { once: true }
                   );
                   stage = "啟動錄音";
+                  addDiagnostic(stage, `嘗試 ${mimeType || "瀏覽器預設格式"}`);
                   recorder.start();
+                  addDiagnostic(stage, `成功，實際格式 ${recorder.mimeType || "未提供"}`);
                   startedRecorder = recorder;
                   break;
                 } catch (error) {
                   attemptActive = false;
                   lastError = error;
-                  console.warn(`[錄音] ${stage}失敗（${mimeType || "預設格式"}）`, error);
+                  diagnosticWarning(`[錄音] ${stage}失敗（${mimeType || "預設格式"}）`, error);
                   // 只停止這次失敗的錄音器；串流留給下一個格式使用。
                   if (recorder && recorder.state !== "inactive") {
                     try { recorder.stop(); }
                     catch (stopError) {
-                      console.warn("[錄音] 清理失敗格式的錄音器失敗", stopError);
+                      diagnosticWarning("[錄音] 清理失敗格式的錄音器失敗", stopError);
                     }
                   }
                 }
@@ -522,7 +639,7 @@
                 recordingSeconds.value += 1;
               }, 1000);
             } catch (error) {
-              console.warn(`[錄音] ${stage}失敗`, error);
+              diagnosticWarning(`[錄音] ${stage}失敗`, error);
               if (requestId !== mediaRequestId || !isComponentActive) {
                 if (requestedStream)
                   requestedStream.getTracks().forEach((track) => track.stop());
@@ -532,7 +649,7 @@
               mediaRequestId += 1;
               if (mediaRecorder && mediaRecorder.state !== "inactive") {
                 try { mediaRecorder.stop(); }
-                catch (stopError) { console.warn("[錄音] 清理錄音器失敗", stopError); }
+                catch (stopError) { diagnosticWarning("[錄音] 清理錄音器失敗", stopError); }
               }
               stopMediaTracks();
               stopRecordingTimer();
@@ -550,11 +667,12 @@
           function stopRecording() {
             if (!mediaRecorder || mediaRecorder.state === "inactive") return;
             try {
+              addDiagnostic("停止錄音", "等待最後的音訊資料");
               mediaRecorder.stop();
               stopRecordingTimer();
               // 保留串流，等最後的 dataavailable 與 stop 事件完成才釋放。
             } catch (error) {
-              console.warn("[錄音] 停止錄音失敗", error);
+              diagnosticWarning("[錄音] 停止錄音失敗", error);
               mediaRequestId += 1;
               stopMediaTracks();
               stopRecordingTimer();
@@ -571,7 +689,11 @@
               isRecording.value
             )
               return;
-            if (audioFileInput.value) audioFileInput.value.click();
+            if (audioFileInput.value) {
+              addDiagnostic("開啟音檔選擇器", "已送出開啟請求");
+              try { audioFileInput.value.click(); }
+              catch (error) { diagnosticWarning("[錄音] 開啟音檔選擇器失敗", error); }
+            }
           }
 
           function selectAudioFile(event) {
@@ -582,21 +704,30 @@
               return;
             const input = event && event.target;
             const file = input && input.files && input.files[0];
-            if (!file) return;
+            if (!file) {
+              addDiagnostic("選擇音檔", "沒有取得檔案");
+              return;
+            }
+            addDiagnostic("選擇音檔", `檔名 ${file.name}，原始類型 ${file.type || "未提供"}，大小 ${file.size} bytes`);
 
             const mimeType =
               trimmed(file.type) || inferMimeTypeFromFilename(file.name);
             if (!mimeType || !mimeType.startsWith("audio/")) {
+              addDiagnostic("音檔格式驗證失敗", `類型 ${mimeType || "未提供"}`, { name: "UnsupportedFileType", message: "無法判斷音檔格式" });
               audioErrorMessage.value =
                 "無法判斷音檔格式，請選擇常見的音訊檔案。";
               input.value = "";
               return;
             }
-            setAudioSelection(
-              file,
-              trimmed(file.name) || `visit.${extensionForMimeType(mimeType)}`,
-              mimeType
-            );
+            try {
+              setAudioSelection(
+                file,
+                trimmed(file.name) || `visit.${extensionForMimeType(mimeType)}`,
+                mimeType
+              );
+            } catch (error) {
+              diagnosticWarning("[錄音] 顯示所選音檔失敗", error);
+            }
             input.value = "";
           }
 
@@ -605,7 +736,7 @@
             isRequestingMicrophone.value = false;
             if (mediaRecorder && mediaRecorder.state !== "inactive") {
               try { mediaRecorder.stop(); }
-              catch (error) { console.warn("[錄音] 離開頁面時停止錄音失敗", error); }
+              catch (error) { diagnosticWarning("[錄音] 離開頁面時停止錄音失敗", error); }
             }
             mediaRecorder = null;
             isRecording.value = false;
@@ -634,6 +765,9 @@
             canRecordAudio, isRequestingMicrophone, isRecording, hasAudio,
             recordingDurationLabel, audioStatusMessage, audioFileInput,
             audioObjectUrl, audioFilename, audioErrorMessage,
+            diagnosticEnvironment, latestDiagnosticError, diagnosticLogText,
+            diagnosticCopyStatus, manualCopyText, copyDiagnostics, clearDiagnostics,
+            recordPlaybackError,
             startRecording, stopRecording, openAudioFilePicker, selectAudioFile,
           };
         },
