@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>語音訪視紀錄</title>
+    <link
+      rel="icon"
+      href="https://scrm.oakmega.site/0/icon/logo.ico"
+      type="image/x-icon"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600&amp;display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="https://scrm.oakmega.site/0/css/primeicons.css" />
+    <link rel="stylesheet" href="https://scrm.oakmega.site/0/css/primeflex.css" />
+    <style>
+      :root {
+        font-size: 18px;
+        --background: #f7f3ee;
+        --foreground: #352b25;
+        --card: #fffdfa;
+        --muted: #f1e8de;
+        --muted-foreground: #75665a;
+        --border: #decbbb;
+        --primary: #895b45;
+        --primary-dark: #6c4939;
+        --danger: #b42318;
+        --radius: 0.625rem;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+      [v-cloak] {
+        display: none;
+      }
+      body {
+        margin: 0;
+        font-family: "Noto Sans TC", system-ui, -apple-system, "Helvetica Neue",
+          Arial, sans-serif;
+        color: var(--foreground);
+        background: #ede7e0;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+      button {
+        touch-action: manipulation;
+      }
+
+      .app-shell {
+        min-height: 100vh;
+        min-height: 100dvh;
+        min-width: 0;
+        width: 100%;
+        max-width: 600px;
+        margin: 0 auto;
+        position: relative;
+        overflow-x: hidden;
+        background: var(--background);
+      }
+      .main-content {
+        width: 100%;
+        min-width: 0;
+        padding: 1rem 0.875rem;
+      }
+      .view-stack {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      .content-card {
+        min-width: 0;
+        padding: 1rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 0.25rem);
+        box-shadow: 0 3px 12px rgba(86, 57, 45, 0.04);
+        overflow-wrap: anywhere;
+      }
+      .field {
+        min-width: 0;
+      }
+      .field label {
+        display: block;
+        margin-bottom: 0.4rem;
+        font-size: 0.86rem;
+        font-weight: 500;
+      }
+      .required-mark {
+        color: var(--danger);
+        font-weight: 500;
+      }
+      .field-hint {
+        margin-top: 0.35rem;
+        color: var(--muted-foreground);
+        font-size: 0.78rem;
+      }
+      .field-error {
+        margin-top: 0.35rem;
+        color: var(--danger);
+        font-size: 0.8rem;
+      }
+      .audio-panel {
+        padding: 0.9rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.8rem;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+      }
+      .audio-panel__status {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--muted-foreground);
+        font-size: 0.84rem;
+      }
+      .audio-panel__status--recording {
+        color: var(--danger);
+        font-weight: 500;
+      }
+      .audio-panel__actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.55rem;
+      }
+      .audio-panel__actions .p-button {
+        width: 100%;
+        min-height: 2.75rem;
+      }
+      .audio-panel audio {
+        width: 100%;
+        max-width: 100%;
+      }
+      .audio-file-input {
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        padding: 0 !important;
+        margin: -1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        white-space: nowrap !important;
+        border: 0 !important;
+      }
+      .audio-file-trigger {
+        width: 100%;
+        min-height: 2.75rem;
+      }
+      @media (max-width: 767px) {
+        :root { font-size: 16px; }
+        .main-content { padding: 1rem 0.75rem; }
+        .audio-panel__actions { grid-template-columns: 1fr; }
+      }
+      @media (min-width: 601px) {
+        .app-shell { box-shadow: 0 0 28px rgba(86, 57, 45, 0.1); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="app-shell" v-cloak>
+      <main class="main-content">
+        <div class="content-card form-section">
+              <div class="field">
+                <label>訪視錄音<span class="required-mark">（必填）</span></label>
+                <div class="audio-panel">
+                  <p
+                    v-if="isRecording"
+                    class="audio-panel__status audio-panel__status--recording"
+                    role="status"
+                  >
+                    <i class="pi pi-circle-fill" aria-hidden="true"></i>
+                    錄音中 {{ recordingDurationLabel }}
+                  </p>
+                  <p v-else class="audio-panel__status" role="status">
+                    <i class="pi pi-microphone" aria-hidden="true"></i>
+                    {{ audioStatusMessage }}
+                  </p>
+
+                  <div class="audio-panel__actions">
+                    <p-button
+                      v-if="!isRecording"
+                      :label="hasAudio ? '重新錄音' : '開始錄音'"
+                      icon="pi pi-microphone"
+                      :loading="isRequestingMicrophone"
+                      :disabled="isRequestingMicrophone || !canRecordAudio"
+                      @click="startRecording"
+                    ></p-button>
+                    <p-button
+                      v-else
+                      label="停止錄音"
+                      icon="pi pi-stop"
+                      severity="danger"
+                      @click="stopRecording"
+                    ></p-button>
+                    <div class="audio-upload-action">
+                      <input
+                        id="visit-audio-file"
+                        ref="audioFileInput"
+                        class="audio-file-input"
+                        type="file"
+                        accept="audio/*"
+                        tabindex="-1"
+                        :disabled="isRequestingMicrophone || isRecording"
+                        @change="selectAudioFile"
+                      />
+                      <p-button
+                        class="audio-file-trigger"
+                        type="button"
+                        label="上傳音檔"
+                        icon="pi pi-upload"
+                        severity="secondary"
+                        outlined
+                        :disabled="isRequestingMicrophone || isRecording"
+                        @click="openAudioFilePicker"
+                      ></p-button>
+                    </div>
+                  </div>
+
+                  <p v-if="!canRecordAudio" class="field-hint">
+                    此瀏覽器不支援錄音，請改用音檔上傳。
+                  </p>
+                  <p v-if="audioFilename" class="field-hint">
+                    目前音檔：{{ audioFilename }}
+                  </p>
+                  <audio
+                    v-if="audioObjectUrl"
+                    :src="audioObjectUrl"
+                    controls
+                    preload="metadata"
+                  >
+                    您的瀏覽器不支援音檔播放。
+                  </audio>
+                  <p v-if="audioErrorMessage" class="field-error" role="alert">
+                    {{ audioErrorMessage }}
+                  </p>
+                </div>
+              </div>
+
+        </div>
+      </main>
+    </div>
+    <script src="https://scrm.oakmega.site/0/js/vue3.prod.js"></script>
+    <script src="https://scrm.oakmega.site/0/js/primevue.min.js"></script>
+    <script src="https://scrm.oakmega.site/0/js/lara.js"></script>
+    <script>
+      const { createApp, computed, onBeforeUnmount, onMounted, ref } = Vue;
+      function trimmed(value) {
+        return typeof value === "string" ? value.trim() : "";
+      }
+      const app = createApp({
+        setup() {
+          const isRequestingMicrophone = ref(false);
+          const isRecording = ref(false);
+          const recordingSeconds = ref(0);
+          const audioBlob = ref(null);
+          const audioFileInput = ref(null);
+          const audioObjectUrl = ref("");
+          const audioFilename = ref("");
+          const audioMimeType = ref("");
+          const audioErrorMessage = ref("");
+          const canRecordAudio = Boolean(
+            window.MediaRecorder &&
+              navigator.mediaDevices &&
+              typeof navigator.mediaDevices.getUserMedia === "function"
+          );
+          let mediaRecorder = null;
+          let mediaStream = null;
+          let recordingTimerId = null;
+          let mediaRequestId = 0;
+          let isComponentActive = true;
+
+          const hasAudio = computed(
+            () => audioBlob.value instanceof Blob && audioBlob.value.size > 0
+          );
+          const recordingDurationLabel = computed(() => {
+            const minutes = Math.floor(recordingSeconds.value / 60);
+            const seconds = recordingSeconds.value % 60;
+            return `${String(minutes).padStart(2, "0")}:${String(
+              seconds
+            ).padStart(2, "0")}`;
+          });
+          const audioStatusMessage = computed(() => {
+            if (isRequestingMicrophone.value) return "正在等待麥克風權限";
+            if (hasAudio.value) return "音檔已準備，可先試聽";
+            return canRecordAudio ? "尚未錄音" : "請上傳音檔";
+          });
+
+          function stopMediaTracks() {
+            if (!mediaStream) return;
+            mediaStream.getTracks().forEach((track) => track.stop());
+            mediaStream = null;
+          }
+
+          function stopRecordingTimer() {
+            if (recordingTimerId === null) return;
+            window.clearInterval(recordingTimerId);
+            recordingTimerId = null;
+          }
+
+          function revokeAudioObjectUrl() {
+            if (!audioObjectUrl.value) return;
+            URL.revokeObjectURL(audioObjectUrl.value);
+            audioObjectUrl.value = "";
+          }
+
+          function resetAudioSelection() {
+            revokeAudioObjectUrl();
+            audioBlob.value = null;
+            audioFilename.value = "";
+            audioMimeType.value = "";
+          }
+
+          function setAudioSelection(blob, filename, mimeType) {
+            revokeAudioObjectUrl();
+            audioBlob.value = blob;
+            audioFilename.value = filename;
+            audioMimeType.value = mimeType;
+            audioObjectUrl.value = URL.createObjectURL(blob);
+            audioErrorMessage.value = "";
+          }
+
+          function preferredRecordingMimeType() {
+            const candidates = [
+              "audio/webm;codecs=opus",
+              "audio/webm",
+              "audio/mp4",
+              "audio/ogg;codecs=opus",
+            ];
+            return (
+              candidates.find(
+                (type) =>
+                  typeof MediaRecorder.isTypeSupported !== "function" ||
+                  MediaRecorder.isTypeSupported(type)
+              ) || ""
+            );
+          }
+
+          function extensionForMimeType(mimeType) {
+            const normalized = trimmed(mimeType).toLowerCase().split(";")[0];
+            return (
+              {
+                "audio/webm": "webm",
+                "audio/mp4": "m4a",
+                "audio/ogg": "ogg",
+                "audio/mpeg": "mp3",
+                "audio/wav": "wav",
+                "audio/x-wav": "wav",
+                "audio/aac": "aac",
+              }[normalized] || "webm"
+            );
+          }
+
+          function inferMimeTypeFromFilename(filename) {
+            const extension = trimmed(filename).toLowerCase().split(".").pop();
+            return (
+              {
+                webm: "audio/webm",
+                m4a: "audio/mp4",
+                mp4: "audio/mp4",
+                mp3: "audio/mpeg",
+                wav: "audio/wav",
+                ogg: "audio/ogg",
+                oga: "audio/ogg",
+                aac: "audio/aac",
+              }[extension] || ""
+            );
+          }
+
+          async function startRecording() {
+            if (
+              !canRecordAudio ||
+              isRequestingMicrophone.value ||
+              isRecording.value
+            )
+              return;
+            const requestId = ++mediaRequestId;
+            isRequestingMicrophone.value = true;
+            audioErrorMessage.value = "";
+
+            try {
+              const requestedStream = await navigator.mediaDevices.getUserMedia(
+                { audio: true }
+              );
+              if (
+                requestId !== mediaRequestId ||
+                !isComponentActive
+              ) {
+                requestedStream.getTracks().forEach((track) => track.stop());
+                return;
+              }
+              mediaStream = requestedStream;
+              const mimeType = preferredRecordingMimeType();
+              const recorder = mimeType
+                ? new MediaRecorder(mediaStream, { mimeType })
+                : new MediaRecorder(mediaStream);
+              const sessionChunks = [];
+              let recordingFailed = false;
+              mediaRecorder = recorder;
+
+              recorder.addEventListener("dataavailable", (event) => {
+                if (event.data && event.data.size > 0)
+                  sessionChunks.push(event.data);
+              });
+              recorder.addEventListener(
+                "stop",
+                () => {
+                  requestedStream.getTracks().forEach((track) => track.stop());
+                  if (mediaStream === requestedStream) mediaStream = null;
+                  if (requestId !== mediaRequestId || !isComponentActive)
+                    return;
+                  stopRecordingTimer();
+                  if (recordingFailed) return;
+                  const actualMimeType =
+                    trimmed(recorder.mimeType) ||
+                    trimmed(sessionChunks[0] && sessionChunks[0].type) ||
+                    "audio/webm";
+                  const blob = new Blob(sessionChunks, {
+                    type: actualMimeType,
+                  });
+                  if (mediaRecorder === recorder) mediaRecorder = null;
+                  isRecording.value = false;
+                  if (blob.size > 0) {
+                    setAudioSelection(
+                      blob,
+                      `visit-${Date.now()}.${extensionForMimeType(
+                        actualMimeType
+                      )}`,
+                      actualMimeType
+                    );
+                  } else {
+                    audioErrorMessage.value = "未錄到有效音訊，請重新錄音。";
+                  }
+                },
+                { once: true }
+              );
+              recorder.addEventListener(
+                "error",
+                () => {
+                  recordingFailed = true;
+                  requestedStream.getTracks().forEach((track) => track.stop());
+                  if (mediaStream === requestedStream) mediaStream = null;
+                  stopRecordingTimer();
+                  if (mediaRecorder === recorder) mediaRecorder = null;
+                  if (requestId !== mediaRequestId || !isComponentActive)
+                    return;
+                  isRecording.value = false;
+                  audioErrorMessage.value =
+                    "錄音過程發生錯誤，請重新錄音或改用既有音檔。";
+                },
+                { once: true }
+              );
+
+              recorder.start();
+              resetAudioSelection();
+              isRecording.value = true;
+              recordingSeconds.value = 0;
+              recordingTimerId = window.setInterval(() => {
+                recordingSeconds.value += 1;
+              }, 1000);
+            } catch (_) {
+              stopMediaTracks();
+              mediaRecorder = null;
+              isRecording.value = false;
+              if (requestId === mediaRequestId && isComponentActive) {
+                audioErrorMessage.value =
+                  "無法使用麥克風，原音檔已保留；請確認權限，或改用既有音檔。";
+              }
+            } finally {
+              if (requestId === mediaRequestId)
+                isRequestingMicrophone.value = false;
+            }
+          }
+
+          function stopRecording() {
+            if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+            mediaRecorder.stop();
+            stopMediaTracks();
+            stopRecordingTimer();
+          }
+
+          function openAudioFilePicker() {
+            if (
+              isRequestingMicrophone.value ||
+              isRecording.value
+            )
+              return;
+            if (audioFileInput.value) audioFileInput.value.click();
+          }
+
+          function selectAudioFile(event) {
+            if (
+              isRequestingMicrophone.value ||
+              isRecording.value
+            )
+              return;
+            const input = event && event.target;
+            const file = input && input.files && input.files[0];
+            if (!file) return;
+
+            const mimeType =
+              trimmed(file.type) || inferMimeTypeFromFilename(file.name);
+            if (!mimeType || !mimeType.startsWith("audio/")) {
+              audioErrorMessage.value =
+                "無法判斷音檔格式，請選擇常見的音訊檔案。";
+              input.value = "";
+              return;
+            }
+            setAudioSelection(
+              file,
+              trimmed(file.name) || `visit.${extensionForMimeType(mimeType)}`,
+              mimeType
+            );
+            input.value = "";
+          }
+
+          function cleanupMediaResources() {
+            mediaRequestId += 1;
+            isRequestingMicrophone.value = false;
+            if (mediaRecorder && mediaRecorder.state !== "inactive")
+              mediaRecorder.stop();
+            mediaRecorder = null;
+            isRecording.value = false;
+            stopRecordingTimer();
+            stopMediaTracks();
+            revokeAudioObjectUrl();
+          }
+
+          function handlePageShow(event) {
+            if (event.persisted && hasAudio.value && !audioObjectUrl.value) {
+              audioObjectUrl.value = URL.createObjectURL(audioBlob.value);
+            }
+          }
+
+          onMounted(() => {
+            window.addEventListener("pagehide", cleanupMediaResources);
+            window.addEventListener("pageshow", handlePageShow);
+          });
+          onBeforeUnmount(() => {
+            isComponentActive = false;
+            window.removeEventListener("pagehide", cleanupMediaResources);
+            window.removeEventListener("pageshow", handlePageShow);
+            cleanupMediaResources();
+          });
+          return {
+            canRecordAudio, isRequestingMicrophone, isRecording, hasAudio,
+            recordingDurationLabel, audioStatusMessage, audioFileInput,
+            audioObjectUrl, audioFilename, audioErrorMessage,
+            startRecording, stopRecording, openAudioFilePicker, selectAudioFile,
+          };
+        },
+      });
+
+      function mergeThemeTokens(base, overrides) {
+        if (!base || typeof base !== "object" || Array.isArray(base)) {
+          return overrides;
+        }
+        const merged = { ...base };
+        Object.entries(overrides).forEach(([key, value]) => {
+          merged[key] =
+            value && typeof value === "object" && !Array.isArray(value)
+              ? mergeThemeTokens(base[key], value)
+              : value;
+        });
+        return merged;
+      }
+
+      const CLIENT_THEME = mergeThemeTokens(PrimeUIX.Themes.Lara, {
+        semantic: {
+          primary: {
+            50: "#fbf6f2",
+            100: "#f3e8df",
+            200: "#e7d2c2",
+            300: "#d7b39d",
+            400: "#c28c70",
+            500: "#a9684e",
+            600: "#895b45",
+            700: "#6c4939",
+            800: "#61372b",
+            900: "#4f3027",
+            950: "#2b1712",
+          },
+          colorScheme: {
+            light: {
+              primary: {
+                color: "#895b45",
+                inverseColor: "#fffdfa",
+                hoverColor: "#6c4939",
+                activeColor: "#61372b",
+              },
+              surface: {
+                0: "#fffdfa",
+                50: "#faf7f3",
+                100: "#f4ede6",
+                200: "#e8dbd0",
+                300: "#d8c6b7",
+                400: "#bda796",
+                500: "#9c8575",
+                600: "#7a685c",
+                700: "#5e5047",
+                800: "#433934",
+                900: "#302925",
+                950: "#1d1816",
+              },
+            },
+          },
+        },
+      });
+
+      app.use(PrimeVue.Config, {
+        theme: {
+          preset: CLIENT_THEME,
+          options: { darkModeSelector: false },
+        },
+      });
+      app.component("p-button", PrimeVue.Button);
+      app.mount("#app");
+    </script>
+  </body>
+</html>
