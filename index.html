@@ -344,20 +344,25 @@
             audioErrorMessage.value = "";
           }
 
-          function preferredRecordingMimeType() {
+          function recordingMimeTypes() {
             const candidates = [
               "audio/webm;codecs=opus",
               "audio/webm",
               "audio/mp4",
               "audio/ogg;codecs=opus",
             ];
-            return (
-              candidates.find(
-                (type) =>
-                  typeof MediaRecorder.isTypeSupported !== "function" ||
-                  MediaRecorder.isTypeSupported(type)
-              ) || ""
-            );
+            // 缺少格式檢查時，不猜測支援格式，交由瀏覽器決定。
+            if (typeof MediaRecorder.isTypeSupported !== "function") return [""];
+            const supported = candidates.filter((type) => {
+              try {
+                return MediaRecorder.isTypeSupported(type);
+              } catch (error) {
+                console.warn("[錄音] 檢查格式失敗", type, error);
+                return false;
+              }
+            });
+            // 指定格式均失敗後，最後嘗試瀏覽器預設格式。
+            return [...supported, ""];
           }
 
           function extensionForMimeType(mimeType) {
@@ -401,95 +406,141 @@
             const requestId = ++mediaRequestId;
             isRequestingMicrophone.value = true;
             audioErrorMessage.value = "";
+            let stage = "取得麥克風";
+            let requestedStream = null;
 
             try {
-              const requestedStream = await navigator.mediaDevices.getUserMedia(
+              requestedStream = await navigator.mediaDevices.getUserMedia(
                 { audio: true }
               );
-              if (
-                requestId !== mediaRequestId ||
-                !isComponentActive
-              ) {
+              if (requestId !== mediaRequestId || !isComponentActive) {
                 requestedStream.getTracks().forEach((track) => track.stop());
                 return;
               }
               mediaStream = requestedStream;
-              const mimeType = preferredRecordingMimeType();
-              const recorder = mimeType
-                ? new MediaRecorder(mediaStream, { mimeType })
-                : new MediaRecorder(mediaStream);
-              const sessionChunks = [];
-              let recordingFailed = false;
-              mediaRecorder = recorder;
-
-              recorder.addEventListener("dataavailable", (event) => {
-                if (event.data && event.data.size > 0)
-                  sessionChunks.push(event.data);
-              });
-              recorder.addEventListener(
-                "stop",
-                () => {
-                  requestedStream.getTracks().forEach((track) => track.stop());
-                  if (mediaStream === requestedStream) mediaStream = null;
-                  if (requestId !== mediaRequestId || !isComponentActive)
-                    return;
-                  stopRecordingTimer();
-                  if (recordingFailed) return;
-                  const actualMimeType =
-                    trimmed(recorder.mimeType) ||
-                    trimmed(sessionChunks[0] && sessionChunks[0].type) ||
-                    "audio/webm";
-                  const blob = new Blob(sessionChunks, {
-                    type: actualMimeType,
+              let lastError = null;
+              let startedRecorder = null;
+              for (const mimeType of recordingMimeTypes()) {
+                let recorder = null;
+                let attemptActive = true;
+                const sessionChunks = [];
+                try {
+                  stage = "建立錄音器";
+                  recorder = mimeType
+                    ? new MediaRecorder(requestedStream, { mimeType })
+                    : new MediaRecorder(requestedStream);
+                  recorder.addEventListener("dataavailable", (event) => {
+                    if (
+                      attemptActive && requestId === mediaRequestId &&
+                      isComponentActive && event.data && event.data.size > 0
+                    )
+                      sessionChunks.push(event.data);
                   });
-                  if (mediaRecorder === recorder) mediaRecorder = null;
-                  isRecording.value = false;
-                  if (blob.size > 0) {
-                    setAudioSelection(
-                      blob,
-                      `visit-${Date.now()}.${extensionForMimeType(
-                        actualMimeType
-                      )}`,
-                      actualMimeType
-                    );
-                  } else {
-                    audioErrorMessage.value = "未錄到有效音訊，請重新錄音。";
+                  recorder.addEventListener(
+                    "stop",
+                    () => {
+                      // 失敗格式的 stop 事件不能關閉下一次嘗試的麥克風。
+                      if (!attemptActive) return;
+                      attemptActive = false;
+                      requestedStream.getTracks().forEach((track) => track.stop());
+                      if (mediaStream === requestedStream) mediaStream = null;
+                      if (requestId !== mediaRequestId || !isComponentActive)
+                        return;
+                      stopRecordingTimer();
+                      const actualMimeType =
+                        trimmed(recorder.mimeType) ||
+                        trimmed(sessionChunks[0] && sessionChunks[0].type) ||
+                        "audio/webm";
+                      if (mediaRecorder === recorder) mediaRecorder = null;
+                      isRecording.value = false;
+                      try {
+                        const blob = new Blob(sessionChunks, { type: actualMimeType });
+                        if (blob.size > 0) {
+                          setAudioSelection(
+                            blob,
+                            `visit-${Date.now()}.${extensionForMimeType(actualMimeType)}`,
+                            actualMimeType
+                          );
+                        } else {
+                          audioErrorMessage.value = "未錄到有效音訊，請重新錄音。";
+                        }
+                      } catch (error) {
+                        console.warn("[錄音] 產生音檔失敗", error);
+                        audioErrorMessage.value =
+                          "錄音過程發生錯誤，請重新錄音或改用既有音檔。";
+                      }
+                    },
+                    { once: true }
+                  );
+                  recorder.addEventListener(
+                    "error",
+                    (event) => {
+                      if (!attemptActive) return;
+                      attemptActive = false;
+                      console.warn("[錄音] 錄音過程失敗", event.error || event);
+                      try {
+                        if (recorder.state !== "inactive") recorder.stop();
+                      } catch (error) {
+                        console.warn("[錄音] 錯誤後停止錄音器失敗", error);
+                      }
+                      requestedStream.getTracks().forEach((track) => track.stop());
+                      if (mediaStream === requestedStream) mediaStream = null;
+                      if (requestId !== mediaRequestId || !isComponentActive)
+                        return;
+                      stopRecordingTimer();
+                      if (mediaRecorder === recorder) mediaRecorder = null;
+                      isRecording.value = false;
+                      audioErrorMessage.value =
+                        "錄音過程發生錯誤，請重新錄音或改用既有音檔。";
+                    },
+                    { once: true }
+                  );
+                  stage = "啟動錄音";
+                  recorder.start();
+                  startedRecorder = recorder;
+                  break;
+                } catch (error) {
+                  attemptActive = false;
+                  lastError = error;
+                  console.warn(`[錄音] ${stage}失敗（${mimeType || "預設格式"}）`, error);
+                  // 只停止這次失敗的錄音器；串流留給下一個格式使用。
+                  if (recorder && recorder.state !== "inactive") {
+                    try { recorder.stop(); }
+                    catch (stopError) {
+                      console.warn("[錄音] 清理失敗格式的錄音器失敗", stopError);
+                    }
                   }
-                },
-                { once: true }
-              );
-              recorder.addEventListener(
-                "error",
-                () => {
-                  recordingFailed = true;
-                  requestedStream.getTracks().forEach((track) => track.stop());
-                  if (mediaStream === requestedStream) mediaStream = null;
-                  stopRecordingTimer();
-                  if (mediaRecorder === recorder) mediaRecorder = null;
-                  if (requestId !== mediaRequestId || !isComponentActive)
-                    return;
-                  isRecording.value = false;
-                  audioErrorMessage.value =
-                    "錄音過程發生錯誤，請重新錄音或改用既有音檔。";
-                },
-                { once: true }
-              );
-
-              recorder.start();
+                }
+              }
+              if (!startedRecorder) throw lastError || new Error("沒有可用的錄音格式");
+              mediaRecorder = startedRecorder;
+              stage = "更新錄音狀態";
               resetAudioSelection();
               isRecording.value = true;
               recordingSeconds.value = 0;
               recordingTimerId = window.setInterval(() => {
                 recordingSeconds.value += 1;
               }, 1000);
-            } catch (_) {
+            } catch (error) {
+              console.warn(`[錄音] ${stage}失敗`, error);
+              if (requestId !== mediaRequestId || !isComponentActive) {
+                if (requestedStream)
+                  requestedStream.getTracks().forEach((track) => track.stop());
+                return;
+              }
+              // 使尚未送達的錄音器事件失效，避免覆蓋錯誤或原音檔。
+              mediaRequestId += 1;
+              if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                try { mediaRecorder.stop(); }
+                catch (stopError) { console.warn("[錄音] 清理錄音器失敗", stopError); }
+              }
               stopMediaTracks();
+              stopRecordingTimer();
               mediaRecorder = null;
               isRecording.value = false;
-              if (requestId === mediaRequestId && isComponentActive) {
-                audioErrorMessage.value =
-                  "無法使用麥克風，原音檔已保留；請確認權限，或改用既有音檔。";
-              }
+              isRequestingMicrophone.value = false;
+              audioErrorMessage.value =
+                "無法使用麥克風，原音檔已保留；請確認權限，或改用既有音檔。";
             } finally {
               if (requestId === mediaRequestId)
                 isRequestingMicrophone.value = false;
@@ -498,9 +549,20 @@
 
           function stopRecording() {
             if (!mediaRecorder || mediaRecorder.state === "inactive") return;
-            mediaRecorder.stop();
-            stopMediaTracks();
-            stopRecordingTimer();
+            try {
+              mediaRecorder.stop();
+              stopRecordingTimer();
+              // 保留串流，等最後的 dataavailable 與 stop 事件完成才釋放。
+            } catch (error) {
+              console.warn("[錄音] 停止錄音失敗", error);
+              mediaRequestId += 1;
+              stopMediaTracks();
+              stopRecordingTimer();
+              mediaRecorder = null;
+              isRecording.value = false;
+              audioErrorMessage.value =
+                "錄音過程發生錯誤，請重新錄音或改用既有音檔。";
+            }
           }
 
           function openAudioFilePicker() {
@@ -541,8 +603,10 @@
           function cleanupMediaResources() {
             mediaRequestId += 1;
             isRequestingMicrophone.value = false;
-            if (mediaRecorder && mediaRecorder.state !== "inactive")
-              mediaRecorder.stop();
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+              try { mediaRecorder.stop(); }
+              catch (error) { console.warn("[錄音] 離開頁面時停止錄音失敗", error); }
+            }
             mediaRecorder = null;
             isRecording.value = false;
             stopRecordingTimer();
