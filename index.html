@@ -316,6 +316,7 @@
           const audioFilename = ref("");
           const audioMimeType = ref("");
           const audioErrorMessage = ref("");
+          const isLineBrowser = /\bLine\//i.test(navigator.userAgent);
           const canRecordAudio = Boolean(
             window.MediaRecorder &&
               navigator.mediaDevices &&
@@ -332,6 +333,8 @@
           const diagnosticCopyStatus = ref("");
           const manualCopyText = ref("");
           const diagnosticEnvironment = [
+            { label: "LINE 內建瀏覽器判斷", value: isLineBrowser ? "是（依瀏覽器資訊判斷）" : "否" },
+            { label: "外部瀏覽器開啟參數", value: new URL(window.location.href).searchParams.get("openExternalBrowser") === "1" ? "已設定（不代表已成功跳出 LINE）" : "未設定" },
             { label: "網頁協定", value: window.location.protocol },
             { label: "安全環境", value: window.isSecureContext ? "是" : "否" },
             { label: "getUserMedia", value: navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function" ? "支援" : "不支援" },
@@ -357,6 +360,18 @@
             diagnosticEntries.value = [...diagnosticEntries.value, message].slice(-100);
             diagnosticCopyStatus.value = "";
             manualCopyText.value = "";
+          }
+
+          function redirectToExternalBrowser() {
+            const url = new URL(window.location.href);
+
+            // 避免未成功跳出 LINE 時反覆導向。
+            if (url.searchParams.get("openExternalBrowser") === "1") {
+              return;
+            }
+
+            url.searchParams.set("openExternalBrowser", "1");
+            window.location.replace(url.href);
           }
 
           function diagnosticWarning(stage, ...details) {
@@ -519,9 +534,16 @@
             addDiagnostic("開始錄音", "準備取得麥克風");
 
             try {
-              requestedStream = await navigator.mediaDevices.getUserMedia(
-                { audio: true }
-              );
+              try {
+                requestedStream = await navigator.mediaDevices.getUserMedia({
+                  audio: true,
+                });
+              } catch (error) {
+                if (isLineBrowser && error.name === "NotAllowedError") {
+                  redirectToExternalBrowser();
+                }
+                throw error;
+              }
               if (requestId !== mediaRequestId || !isComponentActive) {
                 requestedStream.getTracks().forEach((track) => track.stop());
                 return;
